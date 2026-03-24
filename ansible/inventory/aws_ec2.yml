@@ -25,10 +25,13 @@ regions:
 # Only running app-tier instances across all environments
 filters:
   instance-state-name: running
-  "tag:Project":
-    - mypythonproject1-dev
-    - mypythonproject1-staging
-    - mypythonproject1-prod
+  "tag:Environment":
+    - dev
+    - staging
+    - prod
+  "tag:AnsibleGroup":
+    - backend
+    - frontend
 
 # Use instance IDs as hostnames so AWS SSM proxy works transparently
 hostnames:
@@ -37,6 +40,11 @@ hostnames:
 keyed_groups:
   # Role groups: "backend", "frontend"
   - key: tags.AnsibleGroup
+    prefix: ""
+    separator: ""
+
+  # Backward compatibility for older instances tagged with AnsibleRole
+  - key: tags.AnsibleRole
     prefix: ""
     separator: ""
 
