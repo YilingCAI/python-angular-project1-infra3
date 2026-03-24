@@ -345,8 +345,10 @@ resource "aws_autoscaling_group" "backend" {
     version = "$Latest"
   }
 
-  health_check_type         = "ELB"
-  health_check_grace_period = 120
+  # App containers are started by Ansible after infra apply; use EC2 health
+  # here so ASG stabilization does not block on ALB target health.
+  health_check_type         = "EC2"
+  health_check_grace_period = 300
 
   instance_refresh {
     strategy = "Rolling"
@@ -391,8 +393,10 @@ resource "aws_autoscaling_group" "frontend" {
     version = "$Latest"
   }
 
-  health_check_type         = "ELB"
-  health_check_grace_period = 120
+  # App containers are started by Ansible after infra apply; use EC2 health
+  # here so ASG stabilization does not block on ALB target health.
+  health_check_type         = "EC2"
+  health_check_grace_period = 300
 
   instance_refresh {
     strategy = "Rolling"
