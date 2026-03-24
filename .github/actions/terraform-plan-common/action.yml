@@ -341,20 +341,20 @@ runs:
         echo "::error::Drift detected in ${{ inputs.target_environment }}. Review the job summary and artifact terraform-drift-${{ inputs.target_environment }}."
         exit 1
 
-    # - name: Setup Infracost
-    #   if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
-    #   uses: infracost/actions/setup@v3
-    #   with:
-    #     api-key: ${{ inputs.infracost_api_key }}
+    - name: Setup Infracost
+      if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
+      uses: infracost/actions/setup@v3
+      with:
+        api-key: ${{ inputs.infracost_api_key }}
 
-    # - name: Infracost breakdown
-    #   if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
-    #   shell: bash
-    #   run: |
-    #     infracost breakdown \
-    #       --path="environments/${{ inputs.target_environment }}/plan.json" \
-    #       --format=json \
-    #       --out-file="environments/${{ inputs.target_environment }}/infracost.json"
+    - name: Infracost breakdown
+      if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
+      shell: bash
+      run: |
+        infracost breakdown \
+          --path="environments/${{ inputs.target_environment }}/plan.json" \
+          --format=json \
+          --out-file="environments/${{ inputs.target_environment }}/infracost.json"
 
     - name: Upload plan artifact
       id: upload_plan_artifact
