@@ -123,6 +123,12 @@ variable "log_retention_days" {
   default     = 7
 }
 
+variable "ebs_kms_key_arn" {
+  description = "Optional CMK ARN for EC2 root EBS encryption. Leave empty to use AWS managed EBS key."
+  type        = string
+  default     = ""
+}
+
 # EC2 instance sizing
 variable "backend_instance_type" {
   description = "EC2 instance type for backend servers"

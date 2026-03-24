@@ -61,6 +61,37 @@ resource "aws_kms_key_policy" "ec2" {
             "kms:ViaService" = "secretsmanager.${data.aws_region.current.region}.amazonaws.com"
           }
         }
+      },
+      {
+        Sid    = "AllowAutoScalingUseOfKey"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowAutoScalingGrantCreation"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+        }
+        Action = [
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+        Condition = {
+          Bool = {
+            "kms:GrantIsForAWSResource" = "true"
+          }
+        }
       }
     ]
   })
@@ -201,7 +232,7 @@ resource "aws_launch_template" "backend" {
       volume_size           = var.backend_disk_size
       volume_type           = "gp3"
       encrypted             = true
-      kms_key_id            = aws_kms_key.ec2.arn
+      kms_key_id            = var.ebs_kms_key_arn != "" ? var.ebs_kms_key_arn : null
       delete_on_termination = true
     }
   }
@@ -280,7 +311,7 @@ resource "aws_launch_template" "frontend" {
       volume_size           = var.frontend_disk_size
       volume_type           = "gp3"
       encrypted             = true
-      kms_key_id            = aws_kms_key.ec2.arn
+      kms_key_id            = var.ebs_kms_key_arn != "" ? var.ebs_kms_key_arn : null
       delete_on_termination = true
     }
   }

@@ -109,3 +109,9 @@ variable "log_retention_days" {
   type        = number
   default     = 7
 }
+
+variable "ebs_kms_key_arn" {
+  description = "Optional CMK ARN for EC2 root EBS encryption. Leave empty to use AWS managed EBS key."
+  type        = string
+  default     = ""
+}

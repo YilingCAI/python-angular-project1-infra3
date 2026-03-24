@@ -190,6 +190,7 @@ module "ec2" {
   frontend_desired_count = var.frontend_desired_count
   frontend_min_count     = var.frontend_min_count
   frontend_max_count     = var.frontend_max_count
+  ebs_kms_key_arn        = var.ebs_kms_key_arn
 
   secrets_arns = [
     module.rds.secret_arn,
