@@ -232,7 +232,7 @@ resource "aws_launch_template" "backend" {
       volume_size           = var.backend_disk_size
       volume_type           = "gp3"
       encrypted             = true
-      kms_key_id            = var.ebs_kms_key_arn != "" ? var.ebs_kms_key_arn : null
+      kms_key_id            = var.ebs_kms_key_arn
       delete_on_termination = true
     }
   }
@@ -311,7 +311,7 @@ resource "aws_launch_template" "frontend" {
       volume_size           = var.frontend_disk_size
       volume_type           = "gp3"
       encrypted             = true
-      kms_key_id            = var.ebs_kms_key_arn != "" ? var.ebs_kms_key_arn : null
+      kms_key_id            = var.ebs_kms_key_arn
       delete_on_termination = true
     }
   }
