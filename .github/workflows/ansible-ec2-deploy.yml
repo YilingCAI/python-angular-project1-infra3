@@ -101,7 +101,7 @@ jobs:
       - name: Update runtime image tag file in ansible folder
         shell: bash
         run: |
-          cat > ansible/inventory/group_vars/runtime_image_tag.yml <<EOF
+          cat > ansible/playbooks/group_vars/runtime_image_tag.yml <<EOF
           backend_image_tag: "${{ inputs.image_tag }}"
           frontend_image_tag: "${{ inputs.image_tag }}"
           EOF
@@ -153,4 +153,4 @@ jobs:
             --limit "${LIMIT_GROUP}" \
             --private-key "$HOME/.ssh/id_rsa" \
             --extra-vars "image_tag=${{ inputs.image_tag }} previous_tag=${{ inputs.image_tag }} target_env=${{ inputs.environment }}" \
-            --extra-vars "@inventory/group_vars/runtime_image_tag.yml"
+            --extra-vars "@playbooks/group_vars/runtime_image_tag.yml"
