@@ -1,0 +1,164 @@
+name: Terraform Plan Reusable
+
+# Unified reusable plan workflow: handles speculative plans (PRs, no backend state
+# writes) and real plans (main branch, saves tfplan.binary artifact for apply).
+# Callers control the mode via `speculative` input.
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: Terraform target environment (dev/staging/prod)
+        required: true
+        type: string
+      github_environment:
+        description: GitHub Environment name override (falls back to target_environment)
+        required: false
+        type: string
+        default: ""
+      speculative:
+        description: >
+          true  → speculative plan (local-backend override, no artifact, PR comments).
+          false → real plan (remote backend, saves tfplan.binary for apply).
+        required: false
+        type: boolean
+        default: false
+      enable_security_checks:
+        description: Run fmt / checkov / tflint security checks
+        required: false
+        type: boolean
+        default: true
+      checkov_enforcement:
+        description: "Checkov enforcement mode: advisory (soft-fail) or blocking"
+        required: false
+        type: string
+        default: advisory
+      enable_pr_comment:
+        description: Post plan output as a PR comment
+        required: false
+        type: boolean
+        default: false
+      enable_infracost:
+        description: Run Infracost cost estimate (only used when speculative=true)
+        required: false
+        type: boolean
+        default: false
+      drift:
+        description: >
+          true  → drift-detection mode (-detailed-exitcode, drift summary, fail on drift).
+          Cannot be combined with speculative=true.
+        required: false
+        type: boolean
+        default: false
+      fail_on_drift:
+        description: Fail the job when drift is detected (only meaningful when drift=true)
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      JWT_SECRET_KEY:
+        required: true
+      TERRAFORM_STATE_BUCKET:
+        required: false
+      AWS_OIDC_ROLE_ARN:
+        required: false
+      INFRACOST_API_KEY:
+        required: false
+    outputs:
+      plan_artifact_id:
+        description: Uploaded plan artifact ID for deterministic downstream apply download
+        value: ${{ jobs.terraform-plan.outputs.plan_artifact_id }}
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  terraform-plan:
+    name: "Plan [${{ inputs.target_environment }}]${{ inputs.drift && ' (drift)' || inputs.speculative && ' (speculative)' || '' }}"
+    runs-on: ubuntu-latest
+    concurrency:
+      # Speculative plans use their own concurrency group per-ref so they can run
+      # in parallel with real applies and cancel each other on new commits.
+      # Real plans and drift use the shared state-lock group (cancel-in-progress: false)
+      # to prevent two writes competing for the same S3 state object.
+      group: ${{ inputs.speculative && format('terraform-speculative-{0}-{1}', inputs.target_environment, github.ref) || format('terraform-state-{0}', inputs.target_environment) }}
+      cancel-in-progress: ${{ inputs.speculative }}
+    environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
+    env:
+      TF_ENV: ${{ inputs.target_environment }}
+    outputs:
+      plan_artifact_id: ${{ steps.plan_common.outputs.plan_artifact_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Terraform common setup and checks
+        uses: ./.github/actions/terraform-setup-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          operation: plan
+          aws_region: ${{ vars.AWS_REGION }}
+          terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          terraform_plan_speculative: ${{ inputs.speculative }}
+          aws_auth_required: true
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          enable_security_checks: ${{ inputs.enable_security_checks }}
+          checkov_enforcement: ${{ inputs.checkov_enforcement }}
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role_session_name_prefix: ${{ inputs.drift && 'gha-terraform-drift' || inputs.speculative && 'gha-terraform-plan-speculative' || 'gha-terraform-plan' }}
+
+      - name: Capture plan-time remote state version
+        id: state_version
+        if: ${{ !inputs.speculative && !inputs.drift }}
+        shell: bash
+        run: |
+          STATE_KEY="${TF_ENV}/terraform.tfstate"
+          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
+
+          if [ -z "${BUCKET}" ]; then
+            echo "version_id=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION_ID=$(aws s3api list-object-versions \
+            --bucket "${BUCKET}" \
+            --prefix "${STATE_KEY}" \
+            --query "Versions[?IsLatest && Key=='${STATE_KEY}'].VersionId | [0]" \
+            --output text)
+
+          if [ -z "${VERSION_ID}" ] || [ "${VERSION_ID}" = "None" ]; then
+            echo "version_id=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_id=${VERSION_ID}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Terraform shared plan steps
+        id: plan_common
+        uses: ./.github/actions/terraform-plan-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          speculative_plan: ${{ inputs.speculative }}
+          drift_plan: ${{ inputs.drift }}
+          fail_on_drift: ${{ inputs.fail_on_drift }}
+          enable_infracost: ${{ inputs.speculative && inputs.enable_infracost }}
+          infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
+          enable_pr_comment: ${{ inputs.enable_pr_comment }}
+          plan_state_version: ${{ steps.state_version.outputs.version_id || 'unknown' }}
+
+      - name: Workflow summary
+        if: always() && !inputs.drift
+        shell: bash
+        run: |
+          PLAN_MODE="${{ inputs.speculative && 'speculative (no state lock)' || 'real (state locked, artifact saved)' }}"
+          {
+            echo "## Terraform Plan Summary"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Environment** | \`${TF_ENV}\` |"
+            echo "| **Mode** | ${PLAN_MODE} |"
+            echo "| **Security checks** | ${{ inputs.enable_security_checks }} |"
+            echo "| **Status** | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

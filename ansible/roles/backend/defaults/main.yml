@@ -1,0 +1,10 @@
+---
+backend_container_name: "{{ project_name }}-backend"
+backend_restart_policy:  always
+backend_host_port:        8000
+backend_container_port:   8000
+backend_compose_file:     "{{ docker_compose_dir }}/docker-compose.backend.yml"
+backend_env_file:         "{{ app_base_dir }}/.env.backend"
+
+# backend_env_vars is defined in group_vars/backend.yml
+# and can be overridden in env_*.yml

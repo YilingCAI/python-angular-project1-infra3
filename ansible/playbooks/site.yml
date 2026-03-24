@@ -1,0 +1,47 @@
+---
+###############################################################################
+# site.yml — Full stack bootstrap
+#
+# Runs ALL roles in the correct dependency order.
+# Use this for first-time provisioning or when system-level changes are needed.
+#
+# Usage:
+#   ansible-playbook playbooks/site.yml --limit env_dev
+#   ansible-playbook playbooks/site.yml --limit dev_backend --tags docker,backend
+###############################################################################
+
+# ── Backend instances ──────────────────────────────────────────────────────────
+- name: "Bootstrap backend instances"
+  hosts: backend
+  become: true
+  gather_facts: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: security
+      tags: [security]
+    - role: docker
+      tags: [docker]
+    - role: backend
+      tags: [backend, deploy]
+    - role: monitoring
+      tags: [monitoring]
+
+# ── Frontend instances ─────────────────────────────────────────────────────────
+- name: "Bootstrap frontend instances"
+  hosts: frontend
+  become: true
+  gather_facts: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: security
+      tags: [security]
+    - role: docker
+      tags: [docker]
+    - role: frontend
+      tags: [frontend, deploy]
+    - role: nginx
+      tags: [nginx]
+    - role: monitoring
+      tags: [monitoring]

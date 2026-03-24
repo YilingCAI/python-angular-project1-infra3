@@ -1,0 +1,11 @@
+---
+app_environment: prod
+
+# Production must always receive an explicit pinned tag — no mutable fallback
+backend_image_tag:  "{{ image_tag | mandatory('image_tag must be set explicitly for production') }}"
+frontend_image_tag: "{{ image_tag | mandatory('image_tag must be set explicitly for production') }}"
+
+enable_cloudwatch:   true
+enable_node_exporter: true
+health_check_retries: 20
+health_check_delay:   10

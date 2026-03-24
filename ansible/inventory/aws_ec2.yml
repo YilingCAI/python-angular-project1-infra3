@@ -1,0 +1,59 @@
+---
+# AWS EC2 Dynamic Inventory
+# Docs: https://docs.ansible.com/ansible/latest/collections/amazon/aws/aws_ec2_inventory.html
+#
+# Groups created:
+#   backend          — all instances with tag AnsibleGroup=backend
+#   frontend         — all instances with tag AnsibleGroup=frontend
+#   env_dev          — all instances with tag Environment=dev
+#   env_staging      — all instances with tag Environment=staging
+#   env_prod         — all instances with tag Environment=prod
+#   dev_backend      — dev backend instances (combined)
+#   dev_frontend     — dev frontend instances (combined)
+#   staging_backend  — etc.
+#
+# Usage:
+#   TARGET_ENV=dev ansible-inventory --graph
+#   ansible-playbook playbooks/deploy.yml --limit env_dev
+#   ansible-playbook playbooks/deploy.yml --limit dev_backend
+
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - us-east-1
+
+# Only running app-tier instances across all environments
+filters:
+  instance-state-name: running
+  "tag:Project":
+    - mypythonproject1-dev
+    - mypythonproject1-staging
+    - mypythonproject1-prod
+
+# Use instance IDs as hostnames so AWS SSM proxy works transparently
+hostnames:
+  - instance-id
+
+keyed_groups:
+  # Role groups: "backend", "frontend"
+  - key: tags.AnsibleGroup
+    prefix: ""
+    separator: ""
+
+  # Environment groups: "env_dev", "env_staging", "env_prod"
+  - key: tags.Environment
+    prefix: env_
+    separator: ""
+
+  # Combined groups: "dev_backend", "dev_frontend", "staging_backend", etc.
+  - key: "tags.Environment + '_' + tags.AnsibleGroup"
+    prefix: ""
+    separator: ""
+
+compose:
+  # SSM requires instance ID as the SSH target
+  ansible_host: instance_id
+  ansible_user: "'ec2-user'"
+  # Expose tags as host variables
+  environment: tags.Environment | default('dev')
+  node_role:   tags.AnsibleGroup | default('unknown')

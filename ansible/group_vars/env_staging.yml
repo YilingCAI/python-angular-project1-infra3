@@ -1,0 +1,9 @@
+---
+app_environment: staging
+
+backend_image_tag:  "{{ image_tag | default('staging') }}"
+frontend_image_tag: "{{ image_tag | default('staging') }}"
+
+enable_cloudwatch: true
+health_check_retries: 12
+health_check_delay:   5

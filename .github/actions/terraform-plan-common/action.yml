@@ -1,0 +1,500 @@
+name: Terraform Plan Shared Steps
+
+description: >
+  Shared Terraform plan steps: speculative plan, real plan, drift plan, optional
+  Infracost, artifact upload, optional PR comment, and drift summary reporting.
+  Callers select the operating mode via speculative_plan / drift_plan inputs.
+
+inputs:
+  target_environment:
+    description: Terraform target environment (dev/staging/prod)
+    required: true
+  speculative_plan:
+    description: "Run speculative plan mode (no saved plan, no state lock). Mutually exclusive with drift_plan."
+    required: false
+    default: "false"
+  drift_plan:
+    description: "Run drift-detection plan (uses -detailed-exitcode, uploads drift artifact, writes drift summary). Mutually exclusive with speculative_plan."
+    required: false
+    default: "false"
+  fail_on_drift:
+    description: Fail the step (exit 1) when drift is detected (only meaningful when drift_plan=true)
+    required: false
+    default: "true"
+  enable_infracost:
+    description: Run Infracost when API key exists (only meaningful when speculative_plan=true)
+    required: false
+    default: "false"
+  infracost_api_key:
+    description: Infracost API key
+    required: false
+    default: ""
+  enable_pr_comment:
+    description: Post plan output comment to PR
+    required: false
+    default: "false"
+  plan_state_version:
+    description: Remote state version ID captured at plan time (for stale-plan detection)
+    required: false
+    default: "unknown"
+
+outputs:
+  plan_artifact_id:
+    description: Uploaded plan artifact ID (empty for drift runs)
+    value: ${{ steps.upload_plan_artifact.outputs.artifact-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect Terraform var-file
+      id: vars
+      shell: bash
+      run: |
+        ENV_DIR="environments/${{ inputs.target_environment }}"
+        if [ -f "${ENV_DIR}/terraform.tfvars" ]; then
+          echo "var_file_arg=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
+        else
+          echo "var_file_arg=" >> "$GITHUB_OUTPUT"
+          echo "terraform.tfvars not found in ${ENV_DIR}; running with defaults and other provided vars."
+        fi
+
+    - name: Terraform plan (speculative)
+      if: ${{ inputs.speculative_plan == 'true' }}
+      shell: bash
+      run: |
+        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -lock=false \
+          -input=false \
+          -out="plan.tfplan"
+
+        terraform -chdir="environments/${{ inputs.target_environment }}" show \
+          -no-color \
+          "plan.tfplan" > "environments/${{ inputs.target_environment }}/plan-output.txt"
+
+        terraform -chdir="environments/${{ inputs.target_environment }}" show \
+          -json \
+          "plan.tfplan" > "environments/${{ inputs.target_environment }}/plan.json"
+
+    # ── First-deploy EKS bootstrap ────────────────────────────────────────────
+    # On the very first run the EKS cluster does not exist yet, so
+    # `data "aws_eks_cluster" "main"` in providers.tf fails during plan.
+    # This step detects that and performs a targeted apply for module.eks
+    # (Terraform automatically includes its dependency graph: network, ALB,
+    # RDS, KMS, Secrets Manager) so the kubernetes/helm providers can connect
+    # for the subsequent full plan.
+    - name: Bootstrap EKS cluster if missing (first deploy)
+      if: ${{ inputs.speculative_plan != 'true' && inputs.drift_plan != 'true' }}
+      shell: bash
+      run: |
+        ENV_DIR="environments/${{ inputs.target_environment }}"
+
+        PROJECT_NAME=$(awk -F '=' '/^project_name[[:space:]]*=/{gsub(/"/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' \
+          "${ENV_DIR}/terraform.tfvars" 2>/dev/null | tail -n 1)
+        AWS_REGION=$(awk -F '=' '/^aws_region[[:space:]]*=/{gsub(/"/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' \
+          "${ENV_DIR}/terraform.tfvars" 2>/dev/null | tail -n 1)
+        AWS_REGION="${AWS_REGION:-us-east-1}"
+        CLUSTER_NAME="${PROJECT_NAME}-eks"
+
+        if [ -z "${PROJECT_NAME}" ]; then
+          echo "::warning::Could not parse project_name from tfvars; skipping EKS bootstrap check."
+          exit 0
+        fi
+
+        echo "Checking if EKS cluster '${CLUSTER_NAME}' exists in '${AWS_REGION}'..."
+        if aws eks describe-cluster \
+            --name "${CLUSTER_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "cluster.status" \
+            --output text >/dev/null 2>&1; then
+          echo "EKS cluster '${CLUSTER_NAME}' already exists — no bootstrap needed."
+          exit 0
+        fi
+
+        echo "::notice::EKS cluster '${CLUSTER_NAME}' not found. Bootstrapping with -target=module.eks before full plan."
+        terraform -chdir="${ENV_DIR}" apply \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -target=module.eks \
+          -auto-approve \
+          -input=false \
+          -lock-timeout=10m \
+          -no-color 2>&1 | tee "${ENV_DIR}/eks-bootstrap-output.txt"
+        echo "EKS bootstrap complete."
+
+    - name: Terraform plan (real – saves artifact for apply)
+      if: ${{ inputs.speculative_plan != 'true' && inputs.drift_plan != 'true' }}
+      shell: bash
+      run: |
+        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -lock-timeout=5m \
+          -out="tfplan.binary" \
+          -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+
+        cat > "environments/${{ inputs.target_environment }}/plan-metadata.env" <<EOF
+        PLAN_STATE_VERSION=${{ inputs.plan_state_version }}
+        PLAN_SHA=${{ github.sha }}
+        PLAN_RUN_ID=${{ github.run_id }}
+        PLAN_RUN_ATTEMPT=${{ github.run_attempt }}
+        PLAN_ENVIRONMENT=${{ inputs.target_environment }}
+        PLAN_GENERATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        EOF
+
+    # ── Drift-detection plan ──────────────────────────────────────────────────
+    # Uses -refresh-only -detailed-exitcode, which ONLY detects out-of-band
+    # changes made directly in AWS (console, CLI, other tools). A full
+    # `terraform plan -detailed-exitcode` would also flag intended-but-not-yet-
+    # applied Terraform changes as "drift", producing false positives on every
+    # branch until it is applied. -refresh-only avoids that entirely.
+    #
+    # Exit codes: 0 = no drift, 1 = plan error, 2 = out-of-band drift detected.
+    #
+    # Additionally we inspect state for tainted resources. Taints are not
+    # detected by -refresh-only (they exist only in state, not in AWS) but
+    # they cause a destroy+create on next apply and must be flagged proactively.
+    - name: Terraform drift plan (-refresh-only)
+      if: ${{ inputs.drift_plan == 'true' }}
+      id: drift
+      shell: bash
+      run: |
+        PLAN_FILE="environments/${{ inputs.target_environment }}/plan-output.txt"
+        PLAN_EXIT=0
+
+        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          -refresh-only \
+          -detailed-exitcode \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -lock-timeout=5m \
+          -no-color > "${PLAN_FILE}" 2>&1 || PLAN_EXIT=$?
+
+        cat "${PLAN_FILE}"
+        echo "plan_exit=${PLAN_EXIT}" >> "$GITHUB_OUTPUT"
+
+        if [ "${PLAN_EXIT}" -eq 1 ]; then
+          echo "::error::Terraform plan errored for environment ${{ inputs.target_environment }}. See logs."
+          exit 1
+        fi
+        # Exit 2 = out-of-band drift; do NOT exit here — let summary/artifact
+        # steps run first so we always produce a visible report.
+
+    # Inspect state (not plan) for tainted resources. These are separate from
+    # drift but equally dangerous: they encode a destroy+create for a live
+    # resource and must be resolved before the next apply runs.
+    - name: Detect tainted resources in state
+      if: ${{ inputs.drift_plan == 'true' }}
+      id: taint_state
+      shell: bash
+      run: |
+        TAINTED=$(terraform -chdir="environments/${{ inputs.target_environment }}" \
+          state list 2>/dev/null \
+          | while read -r addr; do
+              terraform -chdir="environments/${{ inputs.target_environment }}" \
+                state show "${addr}" 2>/dev/null \
+                | grep -q 'status.*tainted' && echo "${addr}" || true
+            done || true)
+
+        # Faster alternative using the JSON state file if available
+        # (terraform show -json does not expose taint; state pull does)
+        if [ -z "${TAINTED}" ]; then
+          TAINTED=$(terraform -chdir="environments/${{ inputs.target_environment }}" \
+            state pull 2>/dev/null \
+            | jq -r '[.resources[].instances[]
+                | select(.status == "tainted")
+                | .attributes.id // "unknown"] | join(" ")' 2>/dev/null || echo "")
+        fi
+
+        if [ -n "${TAINTED}" ]; then
+          echo "::warning::Tainted resources in ${{ inputs.target_environment }} state: ${TAINTED}"
+          echo "has_tainted=true" >> "$GITHUB_OUTPUT"
+          echo "tainted_list=${TAINTED}" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_tainted=false" >> "$GITHUB_OUTPUT"
+          echo "tainted_list=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload drift artifact
+      if: ${{ inputs.drift_plan == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-drift-${{ inputs.target_environment }}
+        path: environments/${{ inputs.target_environment }}/plan-output.txt
+        retention-days: 90
+
+    - name: Write drift job summary
+      if: ${{ inputs.drift_plan == 'true' }}
+      shell: bash
+      run: |
+        PLAN_FILE="environments/${{ inputs.target_environment }}/plan-output.txt"
+        PLAN_EXIT="${{ steps.drift.outputs.plan_exit }}"
+        HAS_TAINTED="${{ steps.taint_state.outputs.has_tainted }}"
+        TAINTED_LIST="${{ steps.taint_state.outputs.tainted_list }}"
+        RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+        {
+          echo "## :mag: Terraform Drift Report — \`${{ inputs.target_environment }}\`"
+          echo ""
+          echo "| | |"
+          echo "|---|---|"
+          echo "| **Environment** | \`${{ inputs.target_environment }}\` |"
+          echo "| **Triggered by** | \`${{ github.event_name }}\` |"
+          echo "| **Commit** | [\`${GITHUB_SHA::8}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
+          echo "| **Run** | [#${{ github.run_number }}](${RUN_URL}) |"
+          echo "| **Scan type** | \`-refresh-only\` — out-of-band AWS changes only |"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # ── Taint section (always shown when taints exist) ────────────────
+        if [ "${HAS_TAINTED}" == "true" ]; then
+          {
+            echo "### :warning: Tainted resources in state"
+            echo ""
+            echo "The following resources are marked \`tainted\` in Terraform state."
+            echo "They will be **destroyed and recreated** on the next \`terraform apply\`."
+            echo "Run the **Terraform Untaint** workflow before applying to prevent data loss."
+            echo ""
+            echo "| Resource address |"
+            echo "|---|"
+            for addr in ${TAINTED_LIST}; do
+              echo "| \`${addr}\` |"
+            done
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # ── Drift section ─────────────────────────────────────────────────
+        if [ "${PLAN_EXIT}" = "0" ]; then
+          {
+            echo "### :white_check_mark: No out-of-band drift detected"
+            echo ""
+            echo "Infrastructure in \`${{ inputs.target_environment }}\` matches Terraform state."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+        elif [ "${PLAN_EXIT}" = "2" ]; then
+          SUMMARY_LINE=$(grep -E "^Plan:" "${PLAN_FILE}" || true)
+          TO_ADD=$(echo "${SUMMARY_LINE}"     | grep -oP '\d+(?= to add)'     || echo "0")
+          TO_CHANGE=$(echo "${SUMMARY_LINE}"  | grep -oP '\d+(?= to change)'  || echo "0")
+          TO_DESTROY=$(echo "${SUMMARY_LINE}" | grep -oP '\d+(?= to destroy)' || echo "0")
+
+          # Severity: any destroy = critical, otherwise warning
+          if [ "${TO_DESTROY}" -gt 0 ] 2>/dev/null; then
+            SEVERITY_ICON=":red_circle: **CRITICAL**"
+            echo "::error::CRITICAL drift in ${{ inputs.target_environment }}: ${TO_DESTROY} resource(s) will be destroyed if left unreconciled."
+          else
+            SEVERITY_ICON=":yellow_circle: Warning"
+            echo "::warning::Drift detected in ${{ inputs.target_environment }}: ${TO_ADD} add / ${TO_CHANGE} change."
+          fi
+
+          DRIFTED_RESOURCES=$(grep -E "^  # .+ has changed" "${PLAN_FILE}" \
+            | sed -E 's/^  # (.+) has changed/\1/' \
+            | sort \
+            || true)
+
+          {
+            echo "### :rotating_light: Out-of-band drift detected"
+            echo ""
+            echo "**Severity: ${SEVERITY_ICON}**"
+            echo ""
+            echo "**${SUMMARY_LINE}**"
+            echo ""
+            echo "| Change type | Count |"
+            echo "|---|:---:|"
+            echo "| :green_circle: To add | ${TO_ADD} |"
+            echo "| :yellow_circle: To change | ${TO_CHANGE} |"
+            echo "| :red_circle: To destroy | ${TO_DESTROY} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${DRIFTED_RESOURCES}" ]; then
+            {
+              echo ""
+              echo "#### Affected resources"
+              echo ""
+              echo '```'
+              echo "${DRIFTED_RESOURCES}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          {
+            echo ""
+            echo "> :paperclip: Full diff in artifact **\`terraform-drift-${{ inputs.target_environment }}\`** (retained 90 days)"
+            echo ""
+            echo "#### Remediation options"
+            echo "| Option | When to use |"
+            echo "|---|---|"
+            echo "| Run \`terraform apply\` via the plan+apply pipeline | The AWS change was accidental; revert to IaC state |"
+            echo "| Update Terraform config + import resource | The AWS change is intentional; codify it |"
+            echo "| Use **Terraform Untaint** workflow | Resource is tainted but healthy — remove taint only |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+        else
+          {
+            echo "### :x: Plan did not complete"
+            echo ""
+            echo "Terraform exited with code \`${PLAN_EXIT}\`. Check the job logs for errors."
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Fail on detected drift
+      if: ${{ inputs.drift_plan == 'true' && inputs.fail_on_drift == 'true' && steps.drift.outputs.plan_exit == '2' }}
+      shell: bash
+      run: |
+        echo "::error::Drift detected in ${{ inputs.target_environment }}. Review the job summary and artifact terraform-drift-${{ inputs.target_environment }}."
+        exit 1
+
+    - name: Setup Infracost
+      if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
+      uses: infracost/actions/setup@v3
+      with:
+        api-key: ${{ inputs.infracost_api_key }}
+
+    - name: Infracost breakdown
+      if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
+      shell: bash
+      run: |
+        infracost breakdown \
+          --path="environments/${{ inputs.target_environment }}/plan.json" \
+          --format=json \
+          --out-file="environments/${{ inputs.target_environment }}/infracost.json"
+
+    - name: Upload plan artifact
+      id: upload_plan_artifact
+      if: ${{ inputs.drift_plan != 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plan-${{ inputs.target_environment }}
+        if-no-files-found: ignore
+        path: |
+          environments/${{ inputs.target_environment }}/plan-output.txt
+          environments/${{ inputs.target_environment }}/plan.tfplan
+          environments/${{ inputs.target_environment }}/plan.json
+          environments/${{ inputs.target_environment }}/tfplan.binary
+          environments/${{ inputs.target_environment }}/plan-metadata.env
+          environments/${{ inputs.target_environment }}/infracost.json
+
+    - name: Post plan to PR
+      if: ${{ inputs.enable_pr_comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const envName = '${{ inputs.target_environment }}';
+          const planFile = `environments/${envName}/plan-output.txt`;
+          const infracostFile = `environments/${envName}/infracost.json`;
+          const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+          const sha = '${{ github.sha }}'.substring(0, 8);
+          const commitUrl = `${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}`;
+
+          // ── Parse plan output ───────────────────────────────────────────
+          const planRaw = fs.existsSync(planFile)
+            ? fs.readFileSync(planFile, 'utf8')
+            : '(plan output not found)';
+
+          // Extract summary line: "Plan: X to add, Y to change, Z to destroy."
+          const summaryMatch = planRaw.match(/Plan:\s+(\d+) to add,\s+(\d+) to change,\s+(\d+) to destroy/);
+          const toAdd     = summaryMatch ? parseInt(summaryMatch[1]) : 0;
+          const toChange  = summaryMatch ? parseInt(summaryMatch[2]) : 0;
+          const toDestroy = summaryMatch ? parseInt(summaryMatch[3]) : 0;
+          const hasChanges = toAdd > 0 || toChange > 0 || toDestroy > 0;
+          const noChanges  = planRaw.includes('No changes.');
+
+          // Status badge
+          let statusBadge;
+          if (noChanges)           statusBadge = '✅ No changes';
+          else if (toDestroy > 0)  statusBadge = '🔴 Changes detected (includes destroys)';
+          else if (hasChanges)     statusBadge = '🟡 Changes detected';
+          else                     statusBadge = '⚪ Unknown';
+
+          // Extract affected resource addresses
+          const driftedResources = [...planRaw.matchAll(/^  # (.+) will be (updated|destroyed|created|replaced)/gm)]
+            .map(m => `\`${m[1]}\` — **${m[2]}**`)
+            .join('\n');
+
+          // Truncate plan for display (GitHub comment limit is 65536 chars)
+          const planDisplay = planRaw.length > 30000
+            ? planRaw.substring(0, 30000) + '\n\n... (truncated — see full output in workflow run)'
+            : planRaw;
+
+          // ── Infracost summary ────────────────────────────────────────────
+          let infracostSection = '';
+          if (fs.existsSync(infracostFile)) {
+            try {
+              const ic = JSON.parse(fs.readFileSync(infracostFile, 'utf8'));
+              const totalMonthly = ic.totalMonthlyCost ?? ic.summary?.totalMonthlyCost ?? null;
+              const totalDiff    = ic.diffTotalMonthlyCost ?? null;
+              if (totalMonthly !== null) {
+                const diffStr = totalDiff !== null
+                  ? ` (diff: ${parseFloat(totalDiff) >= 0 ? '+' : ''}$${parseFloat(totalDiff).toFixed(2)}/mo)`
+                  : '';
+                infracostSection = `\n### 💰 Infracost estimate\n\n` +
+                  `| | |\n|---|---|\n` +
+                  `| **Estimated monthly cost** | \`$${parseFloat(totalMonthly).toFixed(2)}/mo${diffStr}\` |\n`;
+              }
+            } catch (_) { /* infracost parse failed, skip */ }
+          }
+
+          // ── Build comment body ───────────────────────────────────────────
+          const marker = `<!-- terraform-plan-${envName} -->`;
+          const body = [
+            marker,
+            `## 📋 Terraform Plan — \`${envName}\``,
+            '',
+            `| | |`,
+            `|---|---|`,
+            `| **Status** | ${statusBadge} |`,
+            `| **Environment** | \`${envName}\` |`,
+            `| **Commit** | [\`${sha}\`](${commitUrl}) |`,
+            `| **Workflow run** | [#${{ github.run_number }}](${runUrl}) |`,
+            `| **Mode** | ${{ inputs.speculative_plan == 'true' && 'Speculative (no state lock)' || 'Real plan (state locked)' }} |`,
+            '',
+            ...(hasChanges ? [
+              '### 📊 Change summary',
+              '',
+              '| Change type | Count |',
+              '|---|:---:|',
+              `| 🟢 To add | ${toAdd} |`,
+              `| 🟡 To change | ${toChange} |`,
+              `| 🔴 To destroy | ${toDestroy} |`,
+            ] : []),
+            ...(driftedResources ? [
+              '',
+              '### 📝 Affected resources',
+              '',
+              driftedResources,
+            ] : []),
+            infracostSection,
+            '',
+            '<details>',
+            `<summary>📄 Full plan output (click to expand)</summary>`,
+            '',
+            '```hcl',
+            planDisplay,
+            '```',
+            '</details>',
+            '',
+            `> _Triggered by @${{ github.actor }} · ${new Date().toUTCString()}_`,
+          ].join('\n');
+
+          // ── Upsert comment ───────────────────────────────────────────────
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          const existing = comments.find(c => c.body?.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }

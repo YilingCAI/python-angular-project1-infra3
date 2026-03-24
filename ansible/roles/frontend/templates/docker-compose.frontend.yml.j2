@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+# Used only when frontend_mode = "container"
+services:
+  frontend:
+    image: "{{ frontend_image }}:{{ frontend_image_tag }}"
+    container_name: "{{ frontend_container_name }}"
+    restart: "{{ frontend_restart_policy }}"
+    ports:
+      - "{{ frontend_host_port }}:{{ frontend_container_port }}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:{{ frontend_container_port }}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    labels:
+      project: "{{ project_name }}"
+      environment: "{{ environment }}"
+      role: frontend

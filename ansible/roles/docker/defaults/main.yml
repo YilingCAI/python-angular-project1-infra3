@@ -1,0 +1,5 @@
+---
+docker_compose_version: "2.32.4"
+docker_log_driver:      json-file
+docker_log_max_size:    "100m"
+docker_log_max_file:    "3"

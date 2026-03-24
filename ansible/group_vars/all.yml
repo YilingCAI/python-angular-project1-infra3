@@ -1,0 +1,49 @@
+---
+# ── AWS ────────────────────────────────────────────────────────────────────────
+aws_region:     us-east-1
+aws_account_id: "{{ lookup('env', 'AWS_ACCOUNT_ID') }}"
+
+# ── Project ────────────────────────────────────────────────────────────────────
+project_name: mypythonproject1
+# 'app_environment' is overridden per group in group_vars/env_*.yml
+app_environment:  "{{ lookup('env', 'TARGET_ENV') | default('dev') }}"
+
+# ── ECR ────────────────────────────────────────────────────────────────────────
+ecr_registry:       "{{ aws_account_id }}.dkr.ecr.{{ aws_region }}.amazonaws.com"
+backend_image:      "{{ ecr_registry }}/{{ project_name }}/backend"
+frontend_image:     "{{ ecr_registry }}/{{ project_name }}/frontend"
+# image_tag is passed at runtime via --extra-vars; falls back to env mutable tag
+backend_image_tag:  "{{ image_tag | default(app_environment) }}"
+frontend_image_tag: "{{ image_tag | default(app_environment) }}"
+
+# ── Application ports ─────────────────────────────────────────────────────────
+# Backend Python app (from infra3 tfvars: app_port = 8000)
+backend_container_port: 8000
+backend_host_port:      8000
+# Nginx
+nginx_http_port:  80
+nginx_https_port: 443
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+app_base_dir:         /opt/app
+docker_compose_dir:   "{{ app_base_dir }}/compose"
+frontend_static_path: /var/www/html
+
+# ── Backend upstream URL (nginx → backend) ────────────────────────────────────
+# On same host: 127.0.0.1. On separate instances: override in env_*.yml with ALB URL.
+backend_upstream_host: "127.0.0.1"
+backend_upstream_port: "{{ backend_host_port }}"
+backend_upstream_url:  "http://{{ backend_upstream_host }}:{{ backend_upstream_port }}"
+
+# ── Docker ─────────────────────────────────────────────────────────────────────
+docker_compose_version: "2.32.4"
+
+# ── Health check ──────────────────────────────────────────────────────────────
+health_check_path:    /health
+health_check_retries: 12
+health_check_delay:   5
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+enable_cloudwatch:    true
+cloudwatch_log_group: "/app/{{ project_name }}/{{ app_environment }}"
+enable_node_exporter: false

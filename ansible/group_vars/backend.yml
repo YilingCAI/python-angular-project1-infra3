@@ -1,0 +1,19 @@
+---
+# Variables applied to all hosts in the "backend" Ansible group (tag AnsibleGroup=backend)
+
+# Container config
+backend_container_name: "{{ project_name }}-backend"
+backend_restart_policy:  always
+
+# Environment variables injected into the container via .env file
+# Sensitive values must be passed in as environment variables to the Ansible process
+# (e.g. via GitHub Actions secret → env: block)
+backend_env_vars:
+  APP_ENV:           "{{ environment }}"
+  APP_PORT:          "{{ backend_container_port }}"
+  DATABASE_HOST:     "{{ lookup('env', 'DATABASE_HOST') }}"
+  DATABASE_PORT:     "{{ lookup('env', 'DATABASE_PORT') | default('5432') }}"
+  DATABASE_NAME:     "{{ lookup('env', 'DATABASE_NAME') }}"
+  DATABASE_USERNAME: "{{ lookup('env', 'DATABASE_USERNAME') }}"
+  DATABASE_PASSWORD: "{{ lookup('env', 'DATABASE_PASSWORD') }}"
+  SECRET_KEY:        "{{ lookup('env', 'SECRET_KEY') }}"

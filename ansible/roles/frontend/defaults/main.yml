@@ -1,0 +1,9 @@
+---
+frontend_container_name: "{{ project_name }}-frontend"
+frontend_restart_policy:  always
+frontend_container_port:  80
+frontend_host_port:        4200
+frontend_compose_file:     "{{ docker_compose_dir }}/docker-compose.frontend.yml"
+# "extract" copies static files from image to /var/www/html (host Nginx serves them — preferred)
+# "container" runs the full frontend Docker image as a standalone container
+frontend_mode: extract

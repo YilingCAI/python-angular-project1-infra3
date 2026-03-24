@@ -1,0 +1,39 @@
+---
+###############################################################################
+# deploy.yml — Application-layer deploy only
+#
+# Pulls new images and restarts containers without touching system configuration.
+# Use this for every normal release.
+#
+# Required extra var:
+#   image_tag   — the Docker image tag to deploy
+#
+# Usage:
+#   ansible-playbook playbooks/deploy.yml --limit env_dev \
+#     --extra-vars "image_tag=dev-a1b2c3d"
+#
+#   ansible-playbook playbooks/deploy.yml --limit env_prod \
+#     --extra-vars "image_tag=v1.2.3"
+###############################################################################
+
+- name: "Deploy backend [{{ target_env | default('all') }}]"
+  hosts: backend
+  become: true
+  gather_facts: false
+  vars:
+    backend_image_tag: "{{ image_tag | mandatory('Pass image_tag as --extra-vars') }}"
+  roles:
+    - role: backend
+      tags: [deploy, backend]
+
+- name: "Deploy frontend [{{ target_env | default('all') }}]"
+  hosts: frontend
+  become: true
+  gather_facts: false
+  vars:
+    frontend_image_tag: "{{ image_tag | mandatory('Pass image_tag as --extra-vars') }}"
+  roles:
+    - role: frontend
+      tags: [deploy, frontend]
+    - role: nginx
+      tags: [deploy, nginx]

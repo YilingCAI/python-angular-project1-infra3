@@ -1,0 +1,53 @@
+---
+###############################################################################
+# rollback.yml — Revert to a previous Docker image tag
+#
+# Required extra var:
+#   previous_tag  — the image tag to roll back to
+#
+# Usage:
+#   ansible-playbook playbooks/rollback.yml --limit env_dev \
+#     --extra-vars "previous_tag=dev-abc1234"
+#
+#   ansible-playbook playbooks/rollback.yml --limit env_prod \
+#     --extra-vars "previous_tag=v1.1.0"
+#
+# To skip the interactive confirmation prompt (e.g. in CI):
+#   --extra-vars "skip_confirm=true"
+###############################################################################
+
+- name: "Rollback backend"
+  hosts: backend
+  become: true
+  gather_facts: false
+  vars:
+    backend_image_tag: "{{ previous_tag | mandatory('Pass previous_tag as --extra-vars') }}"
+  pre_tasks:
+    - name: Prompt for rollback confirmation
+      ansible.builtin.pause:
+        prompt: >
+          ⚠️  Rolling backend back to '{{ previous_tag }}' on {{ inventory_hostname }}.
+          Press ENTER to confirm or Ctrl+C → A to abort.
+      when: not (skip_confirm | default(false) | bool)
+  roles:
+    - role: backend
+      tags: [rollback, backend]
+
+- name: "Rollback frontend"
+  hosts: frontend
+  become: true
+  gather_facts: false
+  vars:
+    frontend_image_tag: "{{ previous_tag | mandatory('Pass previous_tag as --extra-vars') }}"
+  pre_tasks:
+    - name: Prompt for rollback confirmation
+      ansible.builtin.pause:
+        prompt: >
+          ⚠️  Rolling frontend back to '{{ previous_tag }}' on {{ inventory_hostname }}.
+          Press ENTER to confirm or Ctrl+C → A to abort.
+      when: not (skip_confirm | default(false) | bool)
+  roles:
+    - role: frontend
+      tags: [rollback, frontend]
+    - role: nginx
+      tags: [rollback, nginx]

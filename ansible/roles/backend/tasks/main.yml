@@ -1,0 +1,55 @@
+---
+- name: Authenticate with AWS ECR
+  ansible.builtin.shell: |
+    aws ecr get-login-password --region {{ aws_region }} \
+      | docker login --username AWS --password-stdin {{ ecr_registry }}
+  changed_when: false
+  tags: [backend, ecr]
+
+- name: Pull backend Docker image
+  community.docker.docker_image:
+    name: "{{ backend_image }}:{{ backend_image_tag }}"
+    source: pull
+    force_source: true
+  notify: Restart backend container
+  tags: [backend, deploy]
+
+- name: Deploy backend environment file
+  ansible.builtin.template:
+    src: backend.env.j2
+    dest: "{{ backend_env_file }}"
+    owner: ec2-user
+    group: ec2-user
+    mode: "0600"
+  notify: Restart backend container
+  tags: [backend, config]
+
+- name: Deploy backend Docker Compose file
+  ansible.builtin.template:
+    src: docker-compose.backend.yml.j2
+    dest: "{{ backend_compose_file }}"
+    owner: ec2-user
+    group: ec2-user
+    mode: "0644"
+  notify: Restart backend container
+  tags: [backend, config]
+
+- name: Start backend container via Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_compose_dir }}"
+    files:
+      - docker-compose.backend.yml
+    state: present
+    pull: never
+  tags: [backend, deploy]
+
+- name: Wait for backend health check to pass
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ backend_host_port }}{{ health_check_path }}"
+    status_code: 200
+    timeout: 5
+  register: health_result
+  retries: "{{ health_check_retries }}"
+  delay:   "{{ health_check_delay }}"
+  until:   health_result.status == 200
+  tags: [backend, healthcheck]

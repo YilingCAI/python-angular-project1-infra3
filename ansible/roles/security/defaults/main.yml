@@ -1,0 +1,10 @@
+---
+ssh_max_auth_tries:          3
+ssh_login_grace_time:        30
+ssh_client_alive_interval:   300
+ssh_client_alive_count_max:  2
+
+firewalld_allowed_services:
+  - ssh
+  - http
+  - https

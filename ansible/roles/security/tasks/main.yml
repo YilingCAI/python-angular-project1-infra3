@@ -1,0 +1,42 @@
+---
+- name: Deploy SSH hardening drop-in config
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    owner: root
+    group: root
+    mode: "0600"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart sshd
+  tags: [security, ssh]
+
+- name: Install firewalld
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  tags: [security, firewall]
+
+- name: Start and enable firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  tags: [security, firewall]
+
+- name: Allow required services through firewall
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ firewalld_allowed_services }}"
+  tags: [security, firewall]
+
+- name: Disable cockpit service in firewall (not needed)
+  ansible.posix.firewalld:
+    service: cockpit
+    state: disabled
+    permanent: true
+    immediate: true
+  ignore_errors: true
+  tags: [security, firewall]
