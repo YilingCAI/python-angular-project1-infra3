@@ -162,6 +162,34 @@ resource "aws_iam_role_policy" "secrets_access" {
   })
 }
 
+# ECR pull access — lets instances authenticate to ECR and pull images
+resource "aws_iam_role_policy" "ecr_access" {
+  name = "${var.project_name}-ec2-ecr-policy"
+  role = aws_iam_role.app.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ECRAuthToken"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPullImages"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+        Resource = "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "app" {
   name = "${var.project_name}-ec2-profile"
   role = aws_iam_role.app.name
@@ -225,6 +253,11 @@ resource "aws_launch_template" "backend" {
     systemctl start  amazon-ssm-agent
     # CloudWatch agent
     dnf install -y amazon-cloudwatch-agent
+    # Docker — required for Ansible to pull and run containers
+    dnf install -y docker
+    systemctl enable docker
+    systemctl start docker
+    usermod -aG docker ec2-user
     # Tag the instance with role metadata (readable by Ansible)
     TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
     INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
@@ -300,6 +333,11 @@ resource "aws_launch_template" "frontend" {
     systemctl enable amazon-ssm-agent
     systemctl start  amazon-ssm-agent
     dnf install -y amazon-cloudwatch-agent
+    # Docker — required for Ansible to pull and run containers
+    dnf install -y docker
+    systemctl enable docker
+    systemctl start docker
+    usermod -aG docker ec2-user
     TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
     INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
     REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
