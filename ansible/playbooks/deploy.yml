@@ -69,7 +69,7 @@
   roles:
     - role: docker
       tags: [docker]
-    - role: frontend
-      tags: [deploy, frontend]
     - role: nginx
       tags: [deploy, nginx]
+    - role: frontend
+      tags: [deploy, frontend]
