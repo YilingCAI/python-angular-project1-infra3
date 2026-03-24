@@ -1,10 +1,10 @@
 name: Terraform Plan & Apply
 
-# Promotion pipeline: plan dev → apply dev → plan staging → apply staging → plan prod → apply prod
+# Promotion pipeline: plan dev -> apply dev -> plan staging -> apply staging -> plan prod -> apply prod
 #
 # Triggers:
-#   workflow_run      → full promotion pipeline only after Terraform Plan Speculative succeeds on push to main
-#   workflow_dispatch → manual plan or apply for a specific environment (promotion rules enforced)
+#   push(main)        -> full promotion pipeline for merged IaC changes
+#   workflow_dispatch -> manual plan or apply for a specific environment (promotion rules enforced)
 #
 # Environment protection rules (configured in GitHub repo settings):
 #   - prod GitHub Environment requires manual approval before apply-prod runs.
@@ -16,9 +16,13 @@ name: Terraform Plan & Apply
 #   job downloads and applies it. This guarantees we apply exactly what was reviewed.
 
 on:
-  workflow_run:
-    workflows: ["Terraform Plan Speculative"]
-    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '**/.terraform.lock.hcl'
+      - '!bootstrap/**'
   workflow_dispatch:
     inputs:
       environment:
@@ -39,7 +43,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: terraform-apply-${{ inputs.environment || 'all' }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  group: terraform-apply-${{ inputs.environment || 'all' }}-${{ github.ref }}
   cancel-in-progress: false
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,7 +52,7 @@ concurrency:
 
 # Promotion guard expression (reused in each job's `if`):
 #   A job for environment X is active when:
-#     • successful workflow_run from Terraform Plan Speculative on push to main, OR
+#     • push to main with Terraform changes, OR
 #     • workflow_dispatch targeting X specifically, OR
 #     • workflow_dispatch targeting "all"
 # The `needs` chain enforces sequencing; `if` gates allow individual env runs.
@@ -59,9 +63,8 @@ jobs:
     name: Plan [dev]
     if: >-
       (
-        github.event_name == 'workflow_run' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'pull_request'
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/main'
       ) ||
       (github.event_name == 'workflow_dispatch' &&
         (inputs.environment == 'dev' || inputs.environment == 'all'))
@@ -82,7 +85,7 @@ jobs:
     if: >-
       needs.plan-dev.result == 'success' &&
       (
-        github.event_name == 'workflow_run' ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'dev' || inputs.environment == 'all') &&
           inputs.action == 'apply')
@@ -102,7 +105,7 @@ jobs:
     if: >-
       (needs.apply-dev.result == 'success' || needs.apply-dev.result == 'skipped') &&
       (
-        github.event_name == 'workflow_run' ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'staging' || inputs.environment == 'all'))
       )
@@ -123,7 +126,7 @@ jobs:
     if: >-
       needs.plan-staging.result == 'success' &&
       (
-        github.event_name == 'workflow_run' ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'staging' || inputs.environment == 'all') &&
           inputs.action == 'apply')
@@ -143,7 +146,7 @@ jobs:
     if: >-
       (needs.apply-staging.result == 'success' || needs.apply-staging.result == 'skipped') &&
       (
-        github.event_name == 'workflow_run' ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'prod' || inputs.environment == 'all'))
       )
@@ -164,7 +167,7 @@ jobs:
     if: >-
       needs.plan-prod.result == 'success' &&
       (
-        github.event_name == 'workflow_run' ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'prod' || inputs.environment == 'all') &&
           inputs.action == 'apply')

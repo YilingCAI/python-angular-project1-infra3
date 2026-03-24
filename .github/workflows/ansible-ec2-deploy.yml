@@ -101,6 +101,25 @@ jobs:
           frontend_image_tag: "${{ inputs.image_tag }}"
           EOF
 
+      - name: Preflight EC2 discovery for target environment
+        shell: bash
+        run: |
+          ENV_TAG="${{ inputs.environment }}"
+          echo "Checking running EC2 instances for Environment=${ENV_TAG} in ${{ vars.AWS_REGION }}"
+
+          MATCH_COUNT=$(aws ec2 describe-instances \
+            --region "${{ vars.AWS_REGION }}" \
+            --filters "Name=instance-state-name,Values=running" "Name=tag:Environment,Values=${ENV_TAG}" \
+            --query "length(Reservations[].Instances[])" \
+            --output text)
+
+          echo "Matched running instances: ${MATCH_COUNT}"
+          if [ "${MATCH_COUNT}" = "0" ]; then
+            echo "::error::No running EC2 instances found with tag Environment=${ENV_TAG}."
+            echo "::error::Ensure infra for this environment is applied and instances are tagged Environment + AnsibleGroup/AnsibleRole."
+            exit 1
+          fi
+
       - name: Run Ansible deploy or rollback
         working-directory: ansible
         env:
