@@ -85,6 +85,11 @@ jobs:
           sudo dpkg -i /tmp/session-manager-plugin.deb
           session-manager-plugin --version
 
+      - name: Export AWS account ID
+        shell: bash
+        run: |
+          echo "AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
+
       - name: Configure SSH private key
         shell: bash
         run: |
@@ -125,6 +130,7 @@ jobs:
         env:
           ANSIBLE_CONFIG: ansible.cfg
           AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
           DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
           DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
           DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
