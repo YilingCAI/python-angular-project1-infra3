@@ -15,6 +15,12 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+locals {
+  # ECR repositories are shared as mypythonproject1/{backend,frontend}.
+  # project_name may be env-suffixed (e.g., mypythonproject1-dev), so allow both.
+  ecr_repo_prefix = trimsuffix(trimsuffix(trimsuffix(var.project_name, "-dev"), "-staging"), "-prod")
+}
+
 # Latest Amazon Linux 2023 AMI (x86_64)
 data "aws_ssm_parameter" "al2023_ami" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
@@ -184,7 +190,10 @@ resource "aws_iam_role_policy" "ecr_access" {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchCheckLayerAvailability"
         ]
-        Resource = "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}/*"
+        Resource = [
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${local.ecr_repo_prefix}/*",
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}/*"
+        ]
       }
     ]
   })
