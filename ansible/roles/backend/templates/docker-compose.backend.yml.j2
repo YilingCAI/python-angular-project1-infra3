@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+services:
+  backend:
+    image: "{{ backend_image }}:{{ backend_image_tag }}"
+    container_name: "{{ backend_container_name }}"
+    restart: "{{ backend_restart_policy }}"
+    env_file: "{{ backend_env_file }}"
+    ports:
+      - "{{ backend_host_port }}:{{ backend_container_port }}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:{{ backend_container_port }}{{ health_check_path }}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+    labels:
+      project: "{{ project_name }}"
+      environment: "{{ environment }}"
+      role: backend

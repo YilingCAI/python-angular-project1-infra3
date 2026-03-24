@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+# SSH hardening drop-in — /etc/ssh/sshd_config.d/99-hardening.conf
+# DO NOT EDIT — managed by Ansible security role
+
+PermitRootLogin no
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+X11Forwarding no
+PrintMotd no
+
+MaxAuthTries {{ ssh_max_auth_tries }}
+LoginGraceTime {{ ssh_login_grace_time }}
+ClientAliveInterval {{ ssh_client_alive_interval }}
+ClientAliveCountMax {{ ssh_client_alive_count_max }}
+
+# Required for AWS SSM SSH proxy
+AllowTcpForwarding yes
+Banner none

@@ -1,0 +1,12 @@
+---
+- name: Restart cloudwatch agent
+  ansible.builtin.systemd:
+    name: amazon-cloudwatch-agent
+    state: restarted
+
+- name: Reload systemd and start node exporter
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: node_exporter
+    state: started
+    enabled: true

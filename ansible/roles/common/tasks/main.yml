@@ -1,0 +1,36 @@
+---
+- name: Update all system packages
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+  tags: [common, packages]
+
+- name: Install base utilities
+  ansible.builtin.dnf:
+    name: "{{ common_base_packages }}"
+    state: present
+  tags: [common, packages]
+
+- name: Set system timezone to UTC
+  community.general.timezone:
+    name: UTC
+  tags: [common, timezone]
+
+- name: Create application base directory
+  ansible.builtin.file:
+    path: "{{ app_base_dir }}"
+    state: directory
+    owner: ec2-user
+    group: ec2-user
+    mode: "0755"
+  tags: [common, directories]
+
+- name: Create Docker Compose working directory
+  ansible.builtin.file:
+    path: "{{ docker_compose_dir }}"
+    state: directory
+    owner: ec2-user
+    group: ec2-user
+    mode: "0755"
+  tags: [common, directories]

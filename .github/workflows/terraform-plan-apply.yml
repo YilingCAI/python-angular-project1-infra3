@@ -1,0 +1,178 @@
+name: Terraform Plan & Apply
+
+# Promotion pipeline: plan dev → apply dev → plan staging → apply staging → plan prod → apply prod
+#
+# Triggers:
+#   workflow_run      → full promotion pipeline only after Terraform Plan Speculative succeeds on push to main
+#   workflow_dispatch → manual plan or apply for a specific environment (promotion rules enforced)
+#
+# Environment protection rules (configured in GitHub repo settings):
+#   - prod GitHub Environment requires manual approval before apply-prod runs.
+#   - staging GitHub Environment may optionally require approval.
+#   - dev runs automatically.
+#
+# Plan artifacts:
+#   Each real plan saves tfplan.binary as an artifact; the corresponding apply
+#   job downloads and applies it. This guarantees we apply exactly what was reviewed.
+
+on:
+  workflow_run:
+    workflows: ["Terraform Plan Speculative"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment. Use 'all' for full dev→staging→prod promotion."
+        required: true
+        type: choice
+        options: [dev, staging, prod, all]
+      action:
+        description: Terraform action
+        required: true
+        type: choice
+        options: [plan, apply]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: terraform-apply-${{ inputs.environment || 'all' }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Promotion guard expression (reused in each job's `if`):
+#   A job for environment X is active when:
+#     • successful workflow_run from Terraform Plan Speculative on push to main, OR
+#     • workflow_dispatch targeting X specifically, OR
+#     • workflow_dispatch targeting "all"
+# The `needs` chain enforces sequencing; `if` gates allow individual env runs.
+
+jobs:
+  # ── PLAN DEV ────────────────────────────────────────────────────────────────
+  plan-dev:
+    name: Plan [dev]
+    if: >-
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'
+      ) ||
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.environment == 'dev' || inputs.environment == 'all'))
+    uses: ./.github/workflows/terraform-plan-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      speculative: false
+      enable_security_checks: true
+      checkov_enforcement: advisory
+      enable_pr_comment: false
+    secrets: inherit
+
+  # ── APPLY DEV ───────────────────────────────────────────────────────────────
+  apply-dev:
+    name: Apply [dev]
+    needs: [plan-dev]
+    if: >-
+      needs.plan-dev.result == 'success' &&
+      (
+        github.event_name == 'workflow_run' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'dev' || inputs.environment == 'all') &&
+          inputs.action == 'apply')
+      )
+    uses: ./.github/workflows/terraform-apply-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      saved_plan_artifact_name: terraform-plan-dev
+      saved_plan_artifact_id: ${{ needs.plan-dev.outputs.plan_artifact_id }}
+    secrets: inherit
+
+  # ── PLAN STAGING ─────────────────────────────────────────────────────────────
+  plan-staging:
+    name: Plan [staging]
+    needs: [apply-dev]
+    if: >-
+      (needs.apply-dev.result == 'success' || needs.apply-dev.result == 'skipped') &&
+      (
+        github.event_name == 'workflow_run' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'staging' || inputs.environment == 'all'))
+      )
+    uses: ./.github/workflows/terraform-plan-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      speculative: false
+      enable_security_checks: true
+      checkov_enforcement: advisory
+      enable_pr_comment: false
+    secrets: inherit
+
+  # ── APPLY STAGING ─────────────────────────────────────────────────────────────
+  apply-staging:
+    name: Apply [staging]
+    needs: [plan-staging]
+    if: >-
+      needs.plan-staging.result == 'success' &&
+      (
+        github.event_name == 'workflow_run' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'staging' || inputs.environment == 'all') &&
+          inputs.action == 'apply')
+      )
+    uses: ./.github/workflows/terraform-apply-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      saved_plan_artifact_name: terraform-plan-staging
+      saved_plan_artifact_id: ${{ needs.plan-staging.outputs.plan_artifact_id }}
+    secrets: inherit
+
+  # ── PLAN PROD ──────────────────────────────────────────────────────────────
+  plan-prod:
+    name: Plan [prod]
+    needs: [apply-staging]
+    if: >-
+      (needs.apply-staging.result == 'success' || needs.apply-staging.result == 'skipped') &&
+      (
+        github.event_name == 'workflow_run' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'prod' || inputs.environment == 'all'))
+      )
+    uses: ./.github/workflows/terraform-plan-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: prod
+      speculative: false
+      enable_security_checks: true
+      checkov_enforcement: blocking
+      enable_pr_comment: false
+    secrets: inherit
+
+  # ── APPLY PROD (requires manual approval via GitHub Environment protection) ──
+  apply-prod:
+    name: Apply [prod] — manual approval required
+    needs: [plan-prod]
+    if: >-
+      needs.plan-prod.result == 'success' &&
+      (
+        github.event_name == 'workflow_run' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'prod' || inputs.environment == 'all') &&
+          inputs.action == 'apply')
+      )
+    uses: ./.github/workflows/terraform-apply-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: prod
+      saved_plan_artifact_name: terraform-plan-prod
+      saved_plan_artifact_id: ${{ needs.plan-prod.outputs.plan_artifact_id }}
+    secrets: inherit

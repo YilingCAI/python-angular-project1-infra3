@@ -1,0 +1,12 @@
+---
+- name: Reload nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded
+
+- name: Restart frontend container
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_compose_dir }}"
+    files:
+      - docker-compose.frontend.yml
+    state: restarted

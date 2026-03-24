@@ -1,0 +1,168 @@
+version: 2
+
+updates:
+  - package-ecosystem: "terraform"
+    directory: "/modules"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:20"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+# Breaking upgrades isolated in their own PR
+      terraform-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"      
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+    rebase-strategy: auto
+    target-branch: "main"
+
+  - package-ecosystem: "terraform"
+    directory: "/environments/dev"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:05"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Breaking upgrades isolated in their own PR
+      terraform-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"   
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+    rebase-strategy: auto
+    target-branch: "main"
+
+  - package-ecosystem: "terraform"
+    directory: "/environments/staging"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:10"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Breaking upgrades isolated in their own PR
+      terraform-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+    rebase-strategy: auto
+    target-branch: "main"
+
+  - package-ecosystem: "terraform"
+    directory: "/environments/prod"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:15"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Breaking upgrades isolated in their own PR
+      terraform-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+    rebase-strategy: auto
+    target-branch: "main"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+      - "infra"
+    assignees:
+      - "YilingCAI"
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "ci:"
+      include: "scope"
+    rebase-strategy: auto
+    target-branch: "main"

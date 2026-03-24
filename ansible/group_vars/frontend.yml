@@ -1,0 +1,18 @@
+---
+# Variables applied to all hosts in the "frontend" Ansible group (tag AnsibleGroup=frontend)
+
+# Container config
+frontend_container_name: "{{ project_name }}-frontend"
+frontend_restart_policy:  always
+
+# frontend_mode controls how Angular is served:
+#   "extract" (default/preferred) — copy static files from image to /var/www/html, served by host Nginx
+#   "container"                   — run the full frontend Docker image as a container
+frontend_mode: extract
+
+# Backend ALB internal DNS — nginx proxies /api/ here.
+# Override in env_dev.yml / env_staging.yml / env_prod.yml once the ALB is known.
+# Format: internal-<name>.<region>.elb.amazonaws.com  (no scheme, no trailing slash)
+backend_upstream_host: "{{ lookup('env', 'BACKEND_ALB_URL') | default('127.0.0.1') }}"
+backend_upstream_port: "{{ backend_host_port }}"
+backend_upstream_url:  "http://{{ backend_upstream_host }}:{{ backend_upstream_port }}"

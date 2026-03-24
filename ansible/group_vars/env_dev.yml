@@ -1,0 +1,11 @@
+---
+app_environment: dev
+
+# Mutable image tags for rapid dev iteration
+backend_image_tag:  "{{ image_tag | default(app_environment) }}"
+frontend_image_tag: "{{ image_tag | default(app_environment) }}"
+
+# Looser settings to save cost in dev
+enable_cloudwatch: false
+health_check_retries: 6
+health_check_delay:   5
