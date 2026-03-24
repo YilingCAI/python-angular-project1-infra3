@@ -13,6 +13,6 @@ frontend_mode: extract
 # Backend ALB internal DNS — nginx proxies /api/ here.
 # Override in env_dev.yml / env_staging.yml / env_prod.yml once the ALB is known.
 # Format: internal-<name>.<region>.elb.amazonaws.com  (no scheme, no trailing slash)
-backend_upstream_host: "{{ lookup('env', 'BACKEND_ALB_URL') | default('127.0.0.1') }}"
+backend_upstream_host: "{{ lookup('env', 'BACKEND_ALB_URL') | default('127.0.0.1', true) }}"
 backend_upstream_port: "{{ backend_host_port }}"
 backend_upstream_url:  "http://{{ backend_upstream_host }}:{{ backend_upstream_port }}"
