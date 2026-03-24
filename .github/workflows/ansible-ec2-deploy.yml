@@ -1,0 +1,131 @@
+name: Ansible EC2 Deploy
+run-name: >-
+  Ansible EC2 Deploy [${{ inputs.environment }}]
+  ${{ inputs.operation || 'deploy' }} tag=${{ inputs.image_tag }}
+
+# Deploy backend/frontend containers on EC2 instances using images that already
+# exist in ECR. Triggered from the app repository workflow via workflow_dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      operation:
+        description: "Deployment operation"
+        required: true
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+      image_tag:
+        description: "Image tag to deploy (or rollback target tag when operation=rollback)"
+        required: true
+        type: string
+      production_confirmation:
+        description: "Required only for prod: type APPROVE_PROD_DEPLOY"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ansible-ec2-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: >-
+      ${{ inputs.operation == 'rollback' && 'Rollback' || 'Deploy' }}
+      [${{ inputs.environment }}] tag=${{ inputs.image_tag }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Confirm production deployment intent
+        if: ${{ inputs.environment == 'prod' }}
+        shell: bash
+        run: |
+          if [ "${{ inputs.production_confirmation }}" != "APPROVE_PROD_DEPLOY" ]; then
+            echo "::error::For prod deploys, set production_confirmation=APPROVE_PROD_DEPLOY"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ansible runtime
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "ansible>=9,<12" boto3 botocore
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Install Session Manager Plugin if missing
+        shell: bash
+        run: |
+          if command -v session-manager-plugin >/dev/null 2>&1; then
+            echo "session-manager-plugin already installed"
+            exit 0
+          fi
+          curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o /tmp/session-manager-plugin.deb
+          sudo dpkg -i /tmp/session-manager-plugin.deb
+          session-manager-plugin --version
+
+      - name: Configure SSH private key
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/id_rsa"
+          chmod 600 "$HOME/.ssh/id_rsa"
+
+      - name: Update runtime image tag file in ansible folder
+        shell: bash
+        run: |
+          cat > ansible/group_vars/runtime_image_tag.yml <<EOF
+          backend_image_tag: "${{ inputs.image_tag }}"
+          frontend_image_tag: "${{ inputs.image_tag }}"
+          EOF
+
+      - name: Run Ansible deploy or rollback
+        working-directory: ansible
+        env:
+          ANSIBLE_CONFIG: ansible.cfg
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+          DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+          DATABASE_USERNAME: ${{ secrets.DATABASE_USERNAME }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY != '' && secrets.SECRET_KEY || secrets.JWT_SECRET_KEY }}
+          BACKEND_ALB_URL: ${{ secrets.BACKEND_ALB_URL }}
+        shell: bash
+        run: |
+          LIMIT_GROUP="env_${{ inputs.environment }}"
+          PLAYBOOK="playbooks/deploy.yml"
+          if [ "${{ inputs.operation }}" = "rollback" ]; then
+            PLAYBOOK="playbooks/rollback.yml"
+          fi
+
+          ansible-inventory -i inventory/aws_ec2.yml --graph --limit "${LIMIT_GROUP}"
+          ansible-playbook \
+            -i inventory/aws_ec2.yml \
+            "${PLAYBOOK}" \
+            --limit "${LIMIT_GROUP}" \
+            --private-key "$HOME/.ssh/id_rsa" \
+            --extra-vars "image_tag=${{ inputs.image_tag }} previous_tag=${{ inputs.image_tag }} target_env=${{ inputs.environment }}" \
+            --extra-vars "@group_vars/runtime_image_tag.yml"
