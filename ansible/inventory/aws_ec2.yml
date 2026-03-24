@@ -29,9 +29,6 @@ filters:
     - dev
     - staging
     - prod
-  "tag:AnsibleGroup":
-    - backend
-    - frontend
 
 # Use instance IDs as hostnames so AWS SSM proxy works transparently
 hostnames:
