@@ -23,6 +23,8 @@
   vars:
     backend_image_tag: "{{ image_tag | mandatory('Pass image_tag as --extra-vars') }}"
   roles:
+    - role: docker
+      tags: [docker]
     - role: backend
       tags: [deploy, backend]
 
@@ -33,6 +35,8 @@
   vars:
     frontend_image_tag: "{{ image_tag | mandatory('Pass image_tag as --extra-vars') }}"
   roles:
+    - role: docker
+      tags: [docker]
     - role: frontend
       tags: [deploy, frontend]
     - role: nginx
