@@ -20,9 +20,9 @@ data "aws_ssm_parameter" "al2023_ami" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
-# ─── KMS key for EC2 EBS + Secrets Manager ───────────────────────────────────
+# ─── KMS key for Secrets Manager (SSH key) ───────────────────────────────────
 resource "aws_kms_key" "ec2" {
-  description             = "KMS key for EC2 EBS volumes and SSH key secret"
+  description             = "KMS key for SSH key secret in Secrets Manager"
   deletion_window_in_days = 10
   enable_key_rotation     = true
 
@@ -59,37 +59,6 @@ resource "aws_kms_key_policy" "ec2" {
         Condition = {
           StringEquals = {
             "kms:ViaService" = "secretsmanager.${data.aws_region.current.region}.amazonaws.com"
-          }
-        }
-      },
-      {
-        Sid    = "AllowAutoScalingUseOfKey"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "AllowAutoScalingGrantCreation"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
-        }
-        Action = [
-          "kms:CreateGrant"
-        ]
-        Resource = "*"
-        Condition = {
-          Bool = {
-            "kms:GrantIsForAWSResource" = "true"
           }
         }
       }
