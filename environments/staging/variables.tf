@@ -124,9 +124,9 @@ variable "log_retention_days" {
 }
 
 variable "ebs_kms_key_arn" {
-  description = "Optional CMK ARN for EC2 root EBS encryption. Leave empty to use AWS managed EBS key."
+  description = "KMS key identifier for EC2 root EBS encryption (ARN, key ID, or alias)."
   type        = string
-  default     = ""
+  default     = "alias/aws/ebs"
 }
 
 # EC2 instance sizing
