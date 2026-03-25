@@ -37,9 +37,9 @@ frontend_min_count     = 1
 frontend_max_count     = 2
 
 # ALB
-health_check_path = "/health/"
+health_check_path     = "/health/"
 backend_path_patterns = ["/health", "/health/*", "/docs", "/docs/*", "/redoc", "/redoc/*", "/openapi.json", "/api/*", "/users", "/users/*", "/games", "/games/*"]
-certificate_arn   = ""
+certificate_arn       = ""
 
 # JWT (provide via: terraform apply -var jwt_secret_key="..." or CI secret)
 # jwt_secret_key = ""
