@@ -253,7 +253,7 @@ resource "aws_security_group" "alb" {
 
   egress {
     description = "Outbound to private workloads"
-    from_port   = 1024
+    from_port   = 80
     to_port     = 65535
     protocol    = "tcp"
     cidr_blocks = var.private_subnet_cidrs
