@@ -33,7 +33,7 @@ variable "frontend_port" {
 variable "backend_path_patterns" {
   description = "Path patterns that should route to backend target group"
   type        = list(string)
-  default     = ["/health", "/health/*", "/docs", "/docs/*", "/redoc", "/redoc/*", "/openapi.json", "/api/*"]
+  default     = ["/health", "/health/*", "/docs", "/docs/*", "/redoc", "/redoc/*", "/openapi.json", "/api/*", "/users", "/users/*", "/games", "/games/*"]
 }
 
 variable "health_check_path" {
