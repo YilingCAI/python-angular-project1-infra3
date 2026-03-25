@@ -9,7 +9,7 @@ public_subnet_cidrs   = ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
 private_subnet_cidrs  = ["10.2.10.0/24", "10.2.11.0/24", "10.2.12.0/24"]
 database_subnet_cidrs = ["10.2.20.0/24", "10.2.21.0/24", "10.2.22.0/24"]
 app_port              = 8000
-frontend_port         = 4200
+frontend_port         = 80
 
 # RDS
 db_name                  = "gamedb"
@@ -37,7 +37,7 @@ frontend_min_count     = 3
 frontend_max_count     = 8
 
 # ALB
-health_check_path      = "/health"
+health_check_path      = "/health/"
 certificate_arn        = ""   # REQUIRED: Add your ACM certificate ARN for production
 alb_enforce_https_only = true # Enforce HTTPS in production
 

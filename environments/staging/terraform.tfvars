@@ -9,7 +9,7 @@ public_subnet_cidrs   = ["10.1.1.0/24", "10.1.2.0/24"]
 private_subnet_cidrs  = ["10.1.10.0/24", "10.1.11.0/24"]
 database_subnet_cidrs = ["10.1.20.0/24", "10.1.21.0/24"]
 app_port              = 8000
-frontend_port         = 4200
+frontend_port         = 80
 
 # RDS
 db_name                  = "gamedb"
@@ -37,7 +37,7 @@ frontend_min_count     = 2
 frontend_max_count     = 4
 
 # ALB
-health_check_path = "/health"
+health_check_path = "/health/"
 certificate_arn   = "" # Add your ACM certificate ARN here
 
 # JWT (provide via CI secret TF_VAR_jwt_secret_key)

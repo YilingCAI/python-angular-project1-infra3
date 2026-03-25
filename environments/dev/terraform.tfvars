@@ -9,7 +9,7 @@ public_subnet_cidrs   = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidrs  = ["10.0.10.0/24", "10.0.11.0/24"]
 database_subnet_cidrs = ["10.0.20.0/24", "10.0.21.0/24"]
 app_port              = 8000
-frontend_port         = 4200
+frontend_port         = 80
 
 # RDS
 db_name                  = "gamedb"
@@ -37,7 +37,7 @@ frontend_min_count     = 1
 frontend_max_count     = 2
 
 # ALB
-health_check_path = "/health"
+health_check_path = "/health/"
 certificate_arn   = ""
 
 # JWT (provide via: terraform apply -var jwt_secret_key="..." or CI secret)
