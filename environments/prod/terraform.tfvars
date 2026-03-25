@@ -38,7 +38,6 @@ frontend_max_count     = 8
 
 # ALB
 health_check_path      = "/health/"
-backend_path_patterns  = ["/health", "/health/*", "/docs", "/docs/*", "/redoc", "/redoc/*", "/openapi.json", "/api/*", "/users", "/users/*", "/games", "/games/*"]
 certificate_arn        = ""   # REQUIRED: Add your ACM certificate ARN for production
 alb_enforce_https_only = true # Enforce HTTPS in production
 

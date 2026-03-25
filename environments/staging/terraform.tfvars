@@ -37,9 +37,8 @@ frontend_min_count     = 2
 frontend_max_count     = 4
 
 # ALB
-health_check_path     = "/health/"
-backend_path_patterns = ["/health", "/health/*", "/docs", "/docs/*", "/redoc", "/redoc/*", "/openapi.json", "/api/*", "/users", "/users/*", "/games", "/games/*"]
-certificate_arn       = "" # Add your ACM certificate ARN here
+health_check_path = "/health/"
+certificate_arn   = "" # Add your ACM certificate ARN here
 
 # JWT (provide via CI secret TF_VAR_jwt_secret_key)
 # jwt_secret_key = ""
