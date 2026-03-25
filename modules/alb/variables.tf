@@ -39,7 +39,7 @@ variable "backend_path_patterns" {
 variable "health_check_path" {
   description = "Health check path"
   type        = string
-  default     = "/health"
+  default     = "/health/"
 }
 
 variable "certificate_arn" {

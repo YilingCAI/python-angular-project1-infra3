@@ -45,7 +45,7 @@ variable "app_port" {
   default     = 8000
 }
 
-variable "frontend_port" {
+variable "frontend_port" { # nginx HTTP port on the host
   description = "Frontend port"
   type        = number
   default     = 4200

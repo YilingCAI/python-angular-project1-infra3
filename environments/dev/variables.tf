@@ -57,9 +57,9 @@ variable "app_port" {
 }
 
 variable "frontend_port" {
-  description = "Frontend port"
+  description = "Frontend port (nginx on host)"
   type        = number
-  default     = 4200
+  default     = 80
 }
 
 # RDS
@@ -196,7 +196,7 @@ variable "frontend_max_count" {
 variable "health_check_path" {
   description = "ALB health check path"
   type        = string
-  default     = "/health"
+  default     = "/health/"
 }
 
 variable "certificate_arn" {
