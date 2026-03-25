@@ -231,6 +231,9 @@ resource "aws_cloudwatch_log_group" "rds" {
   retention_in_days = max(var.log_retention_days, 365)
   kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
+  # Must wait for key policy to be applied before CloudWatch Logs can use the CMK
+  depends_on = [aws_kms_key_policy.cloudwatch_logs]
+
   tags = {
     Name = "${var.project_name}-rds-logs"
   }
